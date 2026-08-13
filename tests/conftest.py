@@ -1,26 +1,10 @@
-"""
-High School Management System API
+import pytest
+from fastapi.testclient import TestClient
+from src.app import app, activities
 
-A super simple FastAPI application that allows students to view and sign up
-for extracurricular activities at Mergington High School.
-"""
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import os
-from pathlib import Path
-
-app = FastAPI(title="Mergington High School API",
-              description="API for viewing and signing up for extracurricular activities")
-
-# Mount the static files directory
-current_dir = Path(__file__).parent
-app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
-          "static")), name="static")
-
-# In-memory activity database
-activities = {
+# Original activities data - used to reset between tests
+ORIGINAL_ACTIVITIES = {
     "Chess Club": {
         "description": "Learn strategies and compete in chess tournaments",
         "schedule": "Fridays, 3:30 PM - 5:00 PM",
@@ -78,49 +62,31 @@ activities = {
 }
 
 
-@app.get("/")
-def root():
-    return RedirectResponse(url="/static/index.html")
-
-
-@app.get("/activities")
-def get_activities():
-    return activities
-
-
-@app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    # Get the specific activity
-    activity = activities[activity_name]
-
-    # Validate student is not already signed up
-    if email in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student already signed up for this activity")
+@pytest.fixture
+def reset_activities():
+    """
+    Reset activities to original state before each test.
+    This ensures test isolation and prevents state leakage between tests.
+    """
+    # Clear the current activities
+    activities.clear()
     
-    # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
-
-
-@app.delete("/activities/{activity_name}/participants/{email}")
-def remove_participant(activity_name: str, email: str):
-    """Remove a participant from an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    # Get the specific activity
-    activity = activities[activity_name]
-
-    # Validate student is signed up
-    if email not in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student is not signed up for this activity")
+    # Repopulate with original data (deep copy to avoid reference issues)
+    for activity_name, activity_data in ORIGINAL_ACTIVITIES.items():
+        activities[activity_name] = {
+            "description": activity_data["description"],
+            "schedule": activity_data["schedule"],
+            "max_participants": activity_data["max_participants"],
+            "participants": activity_data["participants"].copy()
+        }
     
-    # Remove student
-    activity["participants"].remove(email)
-    return {"message": f"Removed {email} from {activity_name}"}
+    yield
+
+
+@pytest.fixture
+def client(reset_activities):
+    """
+    Provide a TestClient instance with reset activities.
+    Each test receives a fresh API client with clean data.
+    """
+    return TestClient(app)
